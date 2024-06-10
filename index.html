@@ -137,7 +137,13 @@
 
         // Perform inference
         const results = await session.run(feeds);
-        const output = results['1863']; // The output name may vary, check the model output name
+
+        // Log the output keys to identify the correct key
+        console.log('Model output keys:', Object.keys(results));
+
+        // Replace '1863' with the correct key
+        const outputKey = Object.keys(results)[0];
+        const output = results[outputKey];
 
         // Post-process and display the result
         const maskData = output.data;
