@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Background Removal with U2Net</title>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin-top: 50px;
+    }
+    #canvas {
+      margin-top: 20px;
+      border: 1px solid black;
+    }
+    .controls {
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Image Background Removal with U2Net</h1>
+  <input type="file" id="inputImage" accept="image/*" onchange="loadImage(event)">
+  <br>
+  <canvas id="canvas"></canvas>
+  <br>
+  <button onclick="removeBackground()">Remove Background</button>
+
+  <script>
+    let imgElement = new Image();
+    let session;
+    const modelPath = 'u2netp.onnx';
+
+    async function loadImage(event) {
+      const inputImage = event.target.files[0];
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        imgElement.onload = function() {
+          const canvas = document.getElementById('canvas');
+          const ctx = canvas.getContext('2d');
+          canvas.width = imgElement.width;
+          canvas.height = imgElement.height;
+          ctx.drawImage(imgElement, 0, 0);
+        };
+        imgElement.src = e.target.result;
+      };
+      reader.readAsDataURL(inputImage);
+    }
+
+    async function initModel() {
+      try {
+        session = await ort.InferenceSession.create(modelPath, {
+          executionProviders: ['wasm', 'cpu']
+        });
+        console.log('Model loaded successfully');
+      } catch (error) {
+        console.error('Failed to load model', error);
+      }
+    }
+
+    function preprocessImage(imageData) {
+      const [width, height] = [imageData.width, imageData.height];
+      const data = imageData.data;
+      const tensorData = new Float32Array(1 * 3 * height * width);
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const offset = (y * width + x) * 4;
+          tensorData[y * width + x] = data[offset] / 255.0; // Red
+          tensorData[height * width + y * width + x] = data[offset + 1] / 255.0; // Green
+          tensorData[2 * height * width + y * width + x] = data[offset + 2] / 255.0; // Blue
+        }
+      }
+
+      const tensor = new ort.Tensor('float32', tensorData, [1, 3, height, width]);
+      return tensor;
+    }
+
+    function applyMask(ctx, maskData, width, height) {
+      const imgData = ctx.getImageData(0, 0, width, height);
+      const data = imgData.data;
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const offset = (y * width + x) * 4;
+          const maskValue = maskData[y * width + x];
+
+          // Make the background transparent
+          if (maskValue < 0.5) {
+            data[offset + 3] = 0;
+          }
+        }
+      }
+
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    async function removeBackground() {
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width;
+      const height = canvas.height;
+
+      // Load and preprocess image data
+      const imgData = ctx.getImageData(0, 0, width, height);
+      const inputTensor = preprocessImage(imgData);
+
+      if (!session) {
+        await initModel();
+        if (!session) {
+          console.error('Model session not available');
+          return;
+        }
+      }
+
+      try {
+        const feeds = { 'input.1': inputTensor };
+
+        // Perform inference
+        const results = await session.run(feeds);
+        const output = results['416'];
+
+        // Post-process and display the result
+        const maskData = output.data;
+        applyMask(ctx, maskData, width, height);
+      } catch (error) {
+        console.error('Failed to run inference', error);
+      }
+    }
+
+    window.onload = async () => {
+      await initModel();
+    };
+  </script>
+</body>
+</html>
