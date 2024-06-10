@@ -29,9 +29,10 @@
   <script>
     let imgElement = new Image();
     let session;
-    const modelPath = 'u2netp.onnx';
+    const modelPath = 'u2netp.onnx'; // Ensure the model is in the same directory
 
-    async function loadImage(event) {
+    // Function to load image and display it on the canvas
+    function loadImage(event) {
       const inputImage = event.target.files[0];
       const reader = new FileReader();
       reader.onload = function(e) {
@@ -47,6 +48,7 @@
       reader.readAsDataURL(inputImage);
     }
 
+    // Function to initialize the ONNX model
     async function initModel() {
       try {
         session = await ort.InferenceSession.create(modelPath, {
@@ -58,6 +60,7 @@
       }
     }
 
+    // Function to preprocess image for the model
     function preprocessImage(imageData) {
       const [width, height] = [imageData.width, imageData.height];
       const data = imageData.data;
@@ -76,6 +79,7 @@
       return tensor;
     }
 
+    // Function to apply the mask to the image
     function applyMask(ctx, maskData, width, height) {
       const imgData = ctx.getImageData(0, 0, width, height);
       const data = imgData.data;
@@ -95,6 +99,7 @@
       ctx.putImageData(imgData, 0, 0);
     }
 
+    // Function to remove the background from the image
     async function removeBackground() {
       const canvas = document.getElementById('canvas');
       const ctx = canvas.getContext('2d');
@@ -118,7 +123,7 @@
 
         // Perform inference
         const results = await session.run(feeds);
-        const output = results['416'];
+        const output = results['1863']; // The output name may vary, check the model output name
 
         // Post-process and display the result
         const maskData = output.data;
@@ -128,6 +133,7 @@
       }
     }
 
+    // Initialize the model when the window loads
     window.onload = async () => {
       await initModel();
     };
