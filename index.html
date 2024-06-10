@@ -12,9 +12,6 @@
             margin-top: 20px;
             border: 1px solid black;
         }
-        .controls {
-            margin-top: 20px;
-        }
         #selected-image {
             display: none;
         }
@@ -26,21 +23,22 @@
     <input id="image-selector" type="file" accept="image/*" style="margin-top:20px;">
     <button id="predict-button" style="margin-top:20px;">Remove Background</button>
     <br>
-    <img id="selected-image" src="" />
+    <img id="selected-image" src="" alt="Selected Image" style="display: none; max-width: 320px; max-height: 320px;" />
     <canvas id="canvas" width="320" height="320"></canvas>
 
     <script>
-        document.getElementById("image-selector").addEventListener("change", function() {
+        document.getElementById("image-selector").addEventListener("change", function () {
             let reader = new FileReader();
-            reader.onload = function() {
+            reader.onload = function () {
                 let dataURL = reader.result;
                 document.getElementById("selected-image").src = dataURL;
+                document.getElementById("selected-image").style.display = 'block';
             }
             let file = document.getElementById("image-selector").files[0];
             reader.readAsDataURL(file);
         });
 
-        document.getElementById("predict-button").addEventListener("click", async function() {
+        document.getElementById("predict-button").addEventListener("click", async function () {
             const canvas = document.getElementById("canvas");
             const ctx = canvas.getContext("2d");
 
@@ -77,19 +75,16 @@
             const output = results[outputKey];
 
             let maskData = output.data;
-            let maskCanvas = document.createElement('canvas');
-            let maskCtx = maskCanvas.getContext('2d');
-            maskCanvas.width = 320;
-            maskCanvas.height = 320;
-
-            // Apply the mask to the image
+            let originalImageData = ctx.getImageData(0, 0, 320, 320);
             let outputImageData = ctx.createImageData(320, 320);
+
+            // Apply the mask to the original image
             for (let i = 0; i < maskData.length; i++) {
                 let pixelIndex = i * 4;
-                outputImageData.data[pixelIndex] = 0; // Red
-                outputImageData.data[pixelIndex + 1] = 0; // Green
-                outputImageData.data[pixelIndex + 2] = 0; // Blue
-                outputImageData.data[pixelIndex + 3] = Math.round(maskData[i] * 255); // Alpha
+                outputImageData.data[pixelIndex] = originalImageData.data[pixelIndex]; // Red
+                outputImageData.data[pixelIndex + 1] = originalImageData.data[pixelIndex + 1]; // Green
+                outputImageData.data[pixelIndex + 2] = originalImageData.data[pixelIndex + 2]; // Blue
+                outputImageData.data[pixelIndex + 3] = maskData[i] > 0.5 ? 255 : 0; // Alpha
             }
 
             ctx.putImageData(outputImageData, 0, 0);
