@@ -1,161 +1,99 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Background Removal with U2Net</title>
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      margin-top: 50px;
-    }
-    #canvas {
-      margin-top: 20px;
-      border: 1px solid black;
-    }
-    .controls {
-      margin-top: 20px;
-    }
-  </style>
+    <title>Background Removal with U2Net</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin-top: 50px;
+        }
+        #canvas {
+            margin-top: 20px;
+            border: 1px solid black;
+        }
+        .controls {
+            margin-top: 20px;
+        }
+        #selected-image {
+            display: none;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 </head>
 <body>
-  <h1>Image Background Removal with U2Net</h1>
-  <input type="file" id="inputImage" accept="image/*" onchange="loadImage(event)">
-  <br>
-  <canvas id="canvas"></canvas>
-  <br>
-  <button onclick="removeBackground()">Remove Background</button>
+    <h1>Image Background Removal with U2Net</h1>
+    <input id="image-selector" type="file" accept="image/*" style="margin-top:20px;">
+    <button id="predict-button" style="margin-top:20px;">Remove Background</button>
+    <br>
+    <img id="selected-image" src="" />
+    <canvas id="canvas" width="320" height="320"></canvas>
 
-  <script>
-    let imgElement = new Image();
-    let session;
-    const modelPath = 'u2netp.onnx'; // Ensure the model is in the same directory
-    const targetSize = 320; // U2Net model expects 320x320 input size
-
-    async function loadImage(event) {
-      const inputImage = event.target.files[0];
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        imgElement.onload = function() {
-          const canvas = document.getElementById('canvas');
-          const ctx = canvas.getContext('2d');
-          canvas.width = imgElement.width;
-          canvas.height = imgElement.height;
-          ctx.drawImage(imgElement, 0, 0);
-        };
-        imgElement.src = e.target.result;
-      };
-      reader.readAsDataURL(inputImage);
-    }
-
-    async function initModel() {
-      try {
-        session = await ort.InferenceSession.create(modelPath, {
-          executionProviders: ['wasm', 'cpu']
+    <script>
+        document.getElementById("image-selector").addEventListener("change", function() {
+            let reader = new FileReader();
+            reader.onload = function() {
+                let dataURL = reader.result;
+                document.getElementById("selected-image").src = dataURL;
+            }
+            let file = document.getElementById("image-selector").files[0];
+            reader.readAsDataURL(file);
         });
-        console.log('Model loaded successfully');
-      } catch (error) {
-        console.error('Failed to load model', error);
-      }
-    }
 
-    function resizeImageToCanvas(imgElement, width, height) {
-      const offscreenCanvas = document.createElement('canvas');
-      offscreenCanvas.width = width;
-      offscreenCanvas.height = height;
-      const offscreenCtx = offscreenCanvas.getContext('2d');
-      offscreenCtx.drawImage(imgElement, 0, 0, width, height);
-      return offscreenCtx.getImageData(0, 0, width, height);
-    }
+        document.getElementById("predict-button").addEventListener("click", async function() {
+            const canvas = document.getElementById("canvas");
+            const ctx = canvas.getContext("2d");
 
-    function preprocessImage(imageData) {
-      const data = imageData.data;
-      const tensorData = new Float32Array(1 * 3 * targetSize * targetSize);
+            // Load the U2Net model
+            const session = await ort.InferenceSession.create('./u2netp.onnx');
+            console.log("Model loaded");
 
-      for (let y = 0; y < targetSize; y++) {
-        for (let x = 0; x < targetSize; x++) {
-          const offset = (y * targetSize + x) * 4;
-          tensorData[y * targetSize + x] = data[offset] / 255.0; // Red
-          tensorData[targetSize * targetSize + y * targetSize + x] = data[offset + 1] / 255.0; // Green
-          tensorData[2 * targetSize * targetSize + y * targetSize + x] = data[offset + 2] / 255.0; // Blue
-        }
-      }
+            let image = document.getElementById("selected-image");
+            let offscreenCanvas = document.createElement('canvas');
+            let offscreenCtx = offscreenCanvas.getContext('2d');
+            offscreenCanvas.width = 320;
+            offscreenCanvas.height = 320;
+            offscreenCtx.drawImage(image, 0, 0, 320, 320);
 
-      const tensor = new ort.Tensor('float32', tensorData, [1, 3, targetSize, targetSize]);
-      return tensor;
-    }
+            // Get image data and convert to tensor
+            let imageData = offscreenCtx.getImageData(0, 0, 320, 320);
+            let tensorData = new Float32Array(1 * 3 * 320 * 320);
 
-    function applyMask(ctx, maskData, width, height) {
-      const imgData = ctx.getImageData(0, 0, width, height);
-      const data = imgData.data;
-      const scaledMask = new Uint8Array(width * height);
+            for (let i = 0; i < imageData.data.length; i += 4) {
+                tensorData[i / 4] = imageData.data[i] / 255; // Red
+                tensorData[(i / 4) + (320 * 320)] = imageData.data[i + 1] / 255; // Green
+                tensorData[(i / 4) + (2 * 320 * 320)] = imageData.data[i + 2] / 255; // Blue
+            }
 
-      // Scale the mask to the original image size
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const origX = Math.floor(x * targetSize / width);
-          const origY = Math.floor(y * targetSize / height);
-          scaledMask[y * width + x] = maskData[origY * targetSize + origX];
-        }
-      }
+            const input = new ort.Tensor('float32', tensorData, [1, 3, 320, 320]);
+            const feeds = { 'input.1': input };
+            const results = await session.run(feeds);
 
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const offset = (y * width + x) * 4;
-          const maskValue = scaledMask[y * width + x];
+            // Log available output keys
+            console.log('Model output keys:', Object.keys(results));
 
-          // Make the background transparent
-          if (maskValue < 0.5) {
-            data[offset + 3] = 0;
-          }
-        }
-      }
+            // Assuming first key is correct
+            const outputKey = Object.keys(results)[0];
+            const output = results[outputKey];
 
-      ctx.putImageData(imgData, 0, 0);
-    }
+            let maskData = output.data;
+            let maskCanvas = document.createElement('canvas');
+            let maskCtx = maskCanvas.getContext('2d');
+            maskCanvas.width = 320;
+            maskCanvas.height = 320;
 
-    async function removeBackground() {
-      const canvas = document.getElementById('canvas');
-      const ctx = canvas.getContext('2d');
-      const originalWidth = canvas.width;
-      const originalHeight = canvas.height;
+            // Apply the mask to the image
+            let outputImageData = ctx.createImageData(320, 320);
+            for (let i = 0; i < maskData.length; i++) {
+                let pixelIndex = i * 4;
+                outputImageData.data[pixelIndex] = 0; // Red
+                outputImageData.data[pixelIndex + 1] = 0; // Green
+                outputImageData.data[pixelIndex + 2] = 0; // Blue
+                outputImageData.data[pixelIndex + 3] = Math.round(maskData[i] * 255); // Alpha
+            }
 
-      // Resize image to target size
-      const resizedImageData = resizeImageToCanvas(imgElement, targetSize, targetSize);
-      const inputTensor = preprocessImage(resizedImageData);
-
-      if (!session) {
-        await initModel();
-        if (!session) {
-          console.error('Model session not available');
-          return;
-        }
-      }
-
-      try {
-        const feeds = { 'input.1': inputTensor };
-
-        // Perform inference
-        const results = await session.run(feeds);
-
-        // Log the output keys to identify the correct key
-        console.log('Model output keys:', Object.keys(results));
-
-        // Replace '1863' with the correct key
-        const outputKey = Object.keys(results)[0];
-        const output = results[outputKey];
-
-        // Post-process and display the result
-        const maskData = output.data;
-        applyMask(ctx, maskData, originalWidth, originalHeight);
-      } catch (error) {
-        console.error('Failed to run inference', error);
-      }
-    }
-
-    window.onload = async () => {
-      await initModel();
-    };
-  </script>
+            ctx.putImageData(outputImageData, 0, 0);
+        });
+    </script>
 </body>
 </html>
